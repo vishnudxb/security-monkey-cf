@@ -1,0 +1,357 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Creates a CloudFormation stack with AutoScaling Group, EC2 instance, RDS db, CloudWatch alerting and security group suitable for running Security Monkey",
+  "Parameters": {
+    "InstanceType": {
+      "Description": "EC2 instance type",
+      "Type": "String",
+      "Default": "m3.medium"
+    },
+    "KeyName": {
+      "Description": "Name of your key pair for instance",
+      "Type": "String",
+      "Default": "security-monkey"
+    },
+    "DatabaseName": {
+      "Description": "The name of the database to be used",
+      "Type": "String",
+      "Default": "securitymonkeydb"
+    },
+    "DatabaseUserName": {
+      "Description": "The name of the user that will connect to the database",
+      "Type": "String",
+      "Default": "secadmin"
+    },
+    "DatabasePassword": {
+      "Description": "The password connect to the database",
+      "Type": "String",
+      "Default": "secmonkey007"
+    },
+    "DatabasePort": {
+      "Description": "The port to connect to the DB",
+      "Type": "String",
+      "Default": "5432"
+    },
+    "DbClass": {
+      "Description": "RDS instance size",
+      "Type": "String",
+      "Default": "db.m3.medium"
+    },
+    "AllocatedStorage": {
+      "Description": "RDS instance storage size in GB",
+      "Type": "String",
+      "Default": "25"
+    },
+    "EmailAddress": {
+      "Description": "Email to where notifications will be sent",
+      "Type": "String",
+      "Default": "me@vishnudxb.me"
+    },
+    "AMI": {
+      "Description": "The EC2 AMI to use",
+      "Type": "String",
+      "Default": "ami-1c2e0463"
+    },
+    "CidrIp": {
+      "Description": "The CidrIp range that will be allowed to ssh to your EC2 instance",
+      "Type": "String",
+      "Default": "8.8.8.8/32"
+    }
+  },
+  "Resources": {
+    "EmailTopic": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "Subscription": [
+          {
+            "Endpoint": {
+              "Ref": "EmailAddress"
+            },
+            "Protocol": "email"
+          }
+        ]
+      }
+    },
+    "SecurityMonkeyRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ec2.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Path": "/security_monkey_role/",
+        "Policies": [
+          {
+            "PolicyName": "security_monkey_read_only",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "acm:Describe*",
+                    "acm:List*",
+                    "cloudtrail:Describe*",
+                    "cloudtrail:Get*",
+                    "config:Describe*",
+                    "cloudwatch:Describe*",
+                    "cloudwatch:Get*",
+                    "cloudwatch:List*",
+                    "ec2:Describe*",
+                    "elasticloadbalancing:Describe*",
+                    "es:Describe*",
+                    "es:List*",
+                    "iam:List*",
+                    "iam:Get*",
+                    "kms:Describe*",
+                    "kms:List*",
+                    "kms:Get*",
+                    "lambda:List*",
+                    "route53:Get*",
+                    "route53:List*",
+                    "rds:Describe*",
+                    "redshift:Describe*",
+                    "s3:Get*",
+                    "s3:List*",
+                    "sdb:GetAttributes",
+                    "sdb:List*",
+                    "sdb:Select*",
+                    "ses:Get*",
+                    "ses:List*",
+                    "sns:Get*",
+                    "sns:List*",
+                    "sqs:GetQueueAttributes",
+                    "sqs:ListQueues",
+                    "sqs:ReceiveMessage"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "SecurityMonkeyInstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/security_monkey_instance_profile/",
+        "Roles": [
+          {
+            "Ref": "SecurityMonkeyRole"
+          }
+        ]
+      }
+    },
+    "SecurityMonkeySecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Group for the security monkey instance",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "80",
+            "ToPort": "80",
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "22",
+            "ToPort": "22",
+            "CidrIp": {
+              "Ref": "CidrIp"
+            }
+          }
+        ]
+      }
+    },
+    "SecurityMonkeyDbSecurityGroup": {
+      "Type": "AWS::RDS::DBSecurityGroup",
+      "Properties": {
+        "DBSecurityGroupIngress": {
+          "EC2SecurityGroupName": {
+            "Ref": "SecurityMonkeySecurityGroup"
+          }
+        },
+        "GroupDescription": "Frontend Access"
+      }
+    },
+    "SecurityMonkeyRDS": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "AllowMajorVersionUpgrade": true,
+        "AutoMinorVersionUpgrade": true,
+        "DBInstanceIdentifier": "security-monkey-rds",
+        "DBName": {
+          "Ref": "DatabaseName"
+        },
+        "Engine": "postgres",
+        "Port": {
+          "Ref": "DatabasePort"
+        },
+        "MasterUsername": {
+          "Ref": "DatabaseUserName"
+        },
+        "MasterUserPassword": {
+          "Ref": "DatabasePassword"
+        },
+        "DBInstanceClass": {
+          "Ref": "DbClass"
+        },
+        "DBSecurityGroups": [
+          {
+            "Ref": "SecurityMonkeyDbSecurityGroup"
+          }
+        ],
+        "AllocatedStorage": {
+          "Ref": "AllocatedStorage"
+        }
+      }
+    },
+    "SecurityMonkeyLaunchConfig": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Properties": {
+        "IamInstanceProfile": {
+          "Fn::GetAtt": [
+            "SecurityMonkeyInstanceProfile",
+            "Arn"
+          ]
+        },
+        "KeyName": {
+          "Ref": "KeyName"
+        },
+        "ImageId": {
+          "Ref": "AMI"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "SecurityMonkeySecurityGroup"
+          }
+        ],
+        "InstanceType": {
+          "Ref": "InstanceType"
+        }
+      }
+    },
+    "SecurityMonkeyAutoScalingGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "NotificationConfiguration": {
+          "TopicARN": {
+            "Ref": "EmailTopic"
+          },
+          "NotificationTypes": [
+            "autoscaling:EC2_INSTANCE_LAUNCH_ERROR",
+            "autoscaling:EC2_INSTANCE_TERMINATE_ERROR"
+          ]
+        },
+        "AvailabilityZones": [
+          "us-east-1a",
+          "us-east-1b",
+          "us-east-1d"
+        ],
+        "LaunchConfigurationName": {
+          "Ref": "SecurityMonkeyLaunchConfig"
+        },
+        "MinSize": "1",
+        "MaxSize": "1"
+      }
+    },
+    "DBCPUAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "CPU exceeds 85% for 30+ minutes",
+        "MetricName": "CPUUtilization",
+        "Namespace": "AWS/RDS",
+        "Statistic": "Average",
+        "Period": "900",
+        "EvaluationPeriods": "2",
+        "Threshold": "85",
+        "AlarmActions": [
+          {
+            "Ref": "EmailTopic"
+          }
+        ],
+        "Dimensions": [
+          {
+            "Name": "DBInstanceIdentifier",
+            "Value": {
+              "Ref": "SecurityMonkeyRDS"
+            }
+          }
+        ],
+        "ComparisonOperator": "GreaterThanThreshold"
+      }
+    },
+    "DBStorageAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Storage available below 1gb for 30+ minutes",
+        "MetricName": "FreeStorageSpace",
+        "Namespace": "AWS/RDS",
+        "Statistic": "Average",
+        "Period": "900",
+        "EvaluationPeriods": "2",
+        "Threshold": "1000000000",
+        "AlarmActions": [
+          {
+            "Ref": "EmailTopic"
+          }
+        ],
+        "Dimensions": [
+          {
+            "Name": "DBInstanceIdentifier",
+            "Value": {
+              "Ref": "SecurityMonkeyRDS"
+            }
+          }
+        ],
+        "ComparisonOperator": "LessThanThreshold"
+      }
+    }
+  },
+  "Outputs": {
+    "DatabaseAddress": {
+      "Value": {
+        "Fn::GetAtt": [
+          "SecurityMonkeyRDS",
+          "Endpoint.Address"
+        ]
+      }
+    },
+    "DatabaseName": {
+      "Value": {
+        "Ref": "DatabaseName"
+      }
+    },
+    "DatabaseUserName": {
+      "Value": {
+        "Ref": "DatabaseUserName"
+      }
+    },
+    "DatabasePassword": {
+      "Value": {
+        "Ref": "DatabasePassword"
+      }
+    },
+    "DatabasePort": {
+      "Value": {
+        "Fn::GetAtt": [
+          "SecurityMonkeyRDS",
+          "Endpoint.Port"
+        ]
+      }
+    }
+  }
+}
